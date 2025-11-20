@@ -30,12 +30,13 @@ public class GenerateOptions
     {
         var errors = new List<string>();
 
+        var validExtensions = new[] { ".sln", ".slnx" };
         if (string.IsNullOrWhiteSpace(Solution))
             errors.Add("Solution path is required.");
         else if (!File.Exists(Solution))
             errors.Add($"Solution file not found: {Solution}");
-        else if (!Solution.EndsWith(".sln", StringComparison.OrdinalIgnoreCase))
-            errors.Add("Solution path must point to a .sln file.");
+        else if (!validExtensions.Any(ext => Solution.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
+            errors.Add("Solution path must point to a .sln/.slnx file.");
 
         if (string.IsNullOrWhiteSpace(Output)) errors.Add("Output path is required.");
 
