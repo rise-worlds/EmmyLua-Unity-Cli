@@ -35,7 +35,7 @@ EmmyLua-Unity-Cli 是一个强大的命令行工具，用于从 Unity C# 项目�
 
 ### 📋 系统要求
 
-- **.NET 8.0 SDK**
+- **.NET 10.0 SDK**
 - **MSBuild** (随.NET SDK 安装)
 
 ### 📦 安装
@@ -82,7 +82,7 @@ unity --solution YourProject.sln --bind ToLua --output ./output \
 
 | 参数 | 简写 | 必需 | 说明 | 示例 |
 |------|------|------|------|------|
-| `--solution` | `-s` | ✅ | Unity 解决方案文件路径 (.sln) | `YourProject.sln` |
+| `--solution` | `-s` | ✅ | Unity 解决方案文件路径 (.sln/.slnx) | `YourProject.sln` |
 | `--bind` | `-b` | ✅ | Lua 绑定框架类型 | `XLua`, `ToLua` |
 | `--output` | `-o` | ✅ | 类型定义文件输出目录 | `./lua_definitions` |
 | `--properties` | `-p` | ❌ | MSBuild 构建属性 | `Configuration=Release` |
