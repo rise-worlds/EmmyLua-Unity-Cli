@@ -87,7 +87,13 @@ public static class LuaTypeConverter
         // Handle generic types
         if (typeName.Contains('<')) return ConvertGenericType(typeName);
 
-        // Return original type name for custom types
+        // Add CS prefix to custom types
+        if (!typeName.StartsWith("CS.") && !typeName.StartsWith("System.") && !typeName.StartsWith("boolean") && !typeName.StartsWith("integer") && !typeName.StartsWith("number") && !typeName.StartsWith("string") && !typeName.StartsWith("any") && !typeName.StartsWith("void"))
+        {
+            return typeName.StartsWith("System.") ? typeName : $"CS.{typeName}";
+        }
+        
+        // Return original type name for already prefixed types
         return typeName;
     }
 
@@ -104,6 +110,20 @@ public static class LuaTypeConverter
         }
 
         if (typeName.StartsWith("System.Collections.Generic.Dictionary<")) return "table";
+
+        // Add CS prefix to custom generic types
+        if (!typeName.StartsWith("CS.") && !typeName.StartsWith("System."))
+        {
+            // 提取泛型参数
+            var start = typeName.IndexOf('<');
+            if (start > 0)
+            {
+                var typeWithoutGeneric = typeName.Substring(0, start);
+                var genericArgs = typeName.Substring(start);
+                return $"CS.{typeWithoutGeneric}{genericArgs}";
+            }
+            return $"CS.{typeName}";
+        }
 
         return typeName;
     }

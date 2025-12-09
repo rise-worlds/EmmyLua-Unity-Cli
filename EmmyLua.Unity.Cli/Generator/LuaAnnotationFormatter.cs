@@ -41,15 +41,33 @@ public static class LuaAnnotationFormatter
         // Add generic type parameters
         if (genericTypes.Count > 0) sb.Append($"<{string.Join(", ", genericTypes)}>");
 
-        // Add inheritance
+        // Add inheritance with CS prefix
+        List<string> inheritanceList = [];
         if (!string.IsNullOrEmpty(baseClass))
         {
-            sb.Append($": {baseClass}");
-            foreach (var csInterface in interfaces) sb.Append($", {csInterface}");
+            // Ensure base class has CS prefix if it's a C# type
+            var formattedBaseClass = baseClass;
+            if (!baseClass.StartsWith("CS.") && !baseClass.StartsWith("System.") && !baseClass.StartsWith("boolean") && !baseClass.StartsWith("integer") && !baseClass.StartsWith("number") && !baseClass.StartsWith("string") && !baseClass.StartsWith("any") && !baseClass.StartsWith("void"))
+            {
+                formattedBaseClass = baseClass.StartsWith("System.") ? baseClass : $"CS.{baseClass}";
+            }
+            inheritanceList.Add(formattedBaseClass);
         }
-        else if (interfaces.Count > 0)
+        
+        // Ensure all interfaces have CS prefix if they're C# types
+        foreach (var csInterface in interfaces)
         {
-            sb.Append($": {string.Join(", ", interfaces)}");
+            var formattedInterface = csInterface;
+            if (!csInterface.StartsWith("CS.") && !csInterface.StartsWith("System.") && !csInterface.StartsWith("boolean") && !csInterface.StartsWith("integer") && !csInterface.StartsWith("number") && !csInterface.StartsWith("string") && !csInterface.StartsWith("any") && !csInterface.StartsWith("void"))
+            {
+                formattedInterface = csInterface.StartsWith("System.") ? csInterface : $"CS.{csInterface}";
+            }
+            inheritanceList.Add(formattedInterface);
+        }
+        
+        if (inheritanceList.Count > 0)
+        {
+            sb.Append($": {string.Join(", ", inheritanceList)}");
         }
 
         sb.AppendLine();

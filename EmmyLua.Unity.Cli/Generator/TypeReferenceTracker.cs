@@ -171,7 +171,7 @@ public class TypeReferenceTracker
     private static string GetFullTypeName(string namespaceName, string typeName)
     {
         return !string.IsNullOrEmpty(namespaceName)
-            ? $"{namespaceName}.{typeName}"
-            : typeName;
+            ? $"CS.{namespaceName}.{typeName}"
+            : $"CS.{typeName}";
     }
 }

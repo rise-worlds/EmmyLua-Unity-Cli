@@ -27,8 +27,28 @@ public class XLuaDumper : IDumper
             var genericManager = new GenericTypeManager();
             csTypes = genericManager.ProcessTypes(csTypes);
 
-            // 第一遍：收集所有已导出的类型
+            // 第一遍：收集所有已导出的类型和命名空间
             TypeTracker.CollectExportedTypes(csTypes);
+            
+            // 预收集所有命名空间，确保在生成文件前NamespaceDict已被填充
+            foreach (var csType in csTypes)
+            {
+                switch (csType)
+                {
+                    case CSClassType csClassType:
+                        RegisterNamespace(csClassType.Namespace, csClassType.Name);
+                        break;
+                    case CSInterface csInterface:
+                        RegisterNamespace(csInterface.Namespace, csInterface.Name);
+                        break;
+                    case CSEnumType csEnumType:
+                        RegisterNamespace(csEnumType.Namespace, csEnumType.Name);
+                        break;
+                    case CSDelegate csDelegate:
+                        RegisterNamespace(csDelegate.Namespace, csDelegate.Name);
+                        break;
+                }
+            }
 
             var sb = new StringBuilder();
             ResetSb(sb);
@@ -63,7 +83,6 @@ public class XLuaDumper : IDumper
 
             if (sb.Length > 0) CacheOrDumpToFile(sb, outPath, true);
 
-            DumpNamespace(sb, outPath);
             TypeTracker.DumpUnexportedTypes(outPath, "xlua_noexport_types.lua");
 
             Console.WriteLine($"Successfully generated {Count} Lua definition files.");
@@ -75,26 +94,6 @@ public class XLuaDumper : IDumper
             Console.WriteLine($"Fatal error during dump: {e.Message}");
             throw;
         }
-    }
-
-    private void DumpNamespace(StringBuilder sb, string outPath)
-    {
-        sb.AppendLine("CS = {}");
-        foreach (var (namespaceString, isNamespace) in NamespaceDict)
-            if (isNamespace)
-                sb.AppendLine($"---@type namespace <\"{namespaceString}\">\nCS.{namespaceString} = {{}}");
-            else
-                sb.AppendLine($"---@type {namespaceString}\nCS.{namespaceString} = {{}}");
-
-        // 添加 XLua 的 typeof 函数定义
-        sb.AppendLine();
-        sb.AppendLine("---XLua typeof 函数，用于获取 C# 类型");
-        sb.AppendLine("---@param type any");
-        sb.AppendLine("---@return System.Type");
-        sb.AppendLine("function typeof(type) end");
-
-        var filePath = Path.Combine(outPath, "xlua_namespace.lua");
-        File.WriteAllText(filePath, sb.ToString());
     }
 
     private void CacheOrDumpToFile(StringBuilder sb, string outPath, bool force = false)
@@ -118,6 +117,35 @@ public class XLuaDumper : IDumper
     {
         sb.Clear();
         sb.AppendLine("---@meta");
+        sb.AppendLine();
+        sb.AppendLine("CS = {}");
+        
+        // 添加 XLua 的 typeof 函数定义
+        sb.AppendLine();
+        sb.AppendLine("---XLua typeof 函数，用于获取 C# 类型");
+        sb.AppendLine("---@param type any");
+        sb.AppendLine("---@return System.Type");
+        sb.AppendLine("function typeof(type) end");
+        sb.AppendLine();
+    }
+    
+    /// <summary>
+    /// 在生成类型定义之前，确保所有必要的命名空间都已创建
+    /// </summary>
+    private void EnsureNamespaceExists(StringBuilder sb, string namespaceName)
+    {
+        if (string.IsNullOrEmpty(namespaceName))
+            return;
+        
+        var namespaces = namespaceName.Split('.');
+        var currentNamespace = "CS";
+        
+        for (int i = 0; i < namespaces.Length; i++)
+        {
+            currentNamespace += "." + namespaces[i];
+            sb.AppendLine(currentNamespace + " = " + currentNamespace + " or {}");
+        }
+        sb.AppendLine();
     }
 
     private void HandleCsClassType(CSClassType csClassType, StringBuilder sb)
@@ -149,6 +177,7 @@ public class XLuaDumper : IDumper
                 sb.AppendLine($"---@overload fun(): {classFullName}");
         }
 
+        // 使用local变量定义类
         sb.AppendLine($"local {csClassType.Name} = {{}}");
 
         // Write fields and events
@@ -184,14 +213,28 @@ public class XLuaDumper : IDumper
             LuaAnnotationFormatter.WriteMethodDeclaration(sb, csClassType.Name, method.Name, method.Params,
                 method.IsStatic);
         }
+        
+        // 确保命名空间存在（移到赋值之前）
+        EnsureNamespaceExists(sb, csClassType.Namespace);
+        
+        // 最后将local变量赋值给完整的CS路径
+        if (!string.IsNullOrEmpty(csClassType.Namespace))
+            sb.AppendLine($"CS.{csClassType.Namespace}.{csClassType.Name} = {csClassType.Name}");
+        else
+            sb.AppendLine($"CS.{csClassType.Name} = {csClassType.Name}");
     }
 
     private void RegisterNamespace(string namespaceName, string typeName)
     {
         if (!string.IsNullOrEmpty(namespaceName))
         {
-            var firstNamespace = namespaceName.Split('.').FirstOrDefault();
-            if (firstNamespace != null) NamespaceDict.TryAdd(firstNamespace, true);
+            // 注册完整的命名空间路径
+            var namespaces = namespaceName.Split('.');
+            for (int i = 1; i <= namespaces.Length; i++)
+            {
+                var currentNamespace = string.Join(".", namespaces.Take(i));
+                NamespaceDict.TryAdd(currentNamespace, true);
+            }
         }
         else
         {
@@ -202,13 +245,15 @@ public class XLuaDumper : IDumper
     private static string GetFullTypeName(string namespaceName, string typeName)
     {
         return !string.IsNullOrEmpty(namespaceName)
-            ? $"{namespaceName}.{typeName}"
-            : typeName;
+            ? $"CS.{namespaceName}.{typeName}"
+            : $"CS.{typeName}";
     }
 
     private void HandleCsInterface(CSInterface csInterface, StringBuilder sb)
     {
         RegisterNamespace(csInterface.Namespace, csInterface.Name);
+
+        var interfaceFullName = GetFullTypeName(csInterface.Namespace, csInterface.Name);
 
         // 检查接口继承
         foreach (var iface in csInterface.Interfaces) TypeTracker.CheckAndRecordType(iface);
@@ -223,7 +268,19 @@ public class XLuaDumper : IDumper
             foreach (var param in method.Params) TypeTracker.CheckAndRecordType(param.TypeName);
         }
 
-        sb.AppendLine($"---@interface {csInterface.Name}");
+        sb.AppendLine($"---@interface {interfaceFullName}");
+        
+        // 使用local变量定义接口
+        sb.AppendLine($"local {csInterface.Name} = {{}}");
+        
+        // 确保命名空间存在（移到赋值之前）
+        EnsureNamespaceExists(sb, csInterface.Namespace);
+        
+        // 最后将local变量赋值给完整的CS路径
+        if (!string.IsNullOrEmpty(csInterface.Namespace))
+            sb.AppendLine($"CS.{csInterface.Namespace}.{csInterface.Name} = {csInterface.Name}");
+        else
+            sb.AppendLine($"CS.{csInterface.Name} = {csInterface.Name}");
     }
 
     private void HandleCsEnumType(CSEnumType csEnumType, StringBuilder sb)
@@ -235,6 +292,7 @@ public class XLuaDumper : IDumper
         LuaAnnotationFormatter.WriteCommentAndLocation(sb, csEnumType.Comment, csEnumType.Location);
         LuaAnnotationFormatter.WriteTypeAnnotation(sb, "enum", classFullName);
 
+        // 使用local变量定义枚举
         sb.AppendLine($"local {csEnumType.Name} = {{");
 
         foreach (var field in csEnumType.Fields)
@@ -247,6 +305,15 @@ public class XLuaDumper : IDumper
         }
 
         sb.AppendLine("}");
+        
+        // 确保命名空间存在（移到赋值之前）
+        EnsureNamespaceExists(sb, csEnumType.Namespace);
+        
+        // 最后将local变量赋值给完整的CS路径
+        if (!string.IsNullOrEmpty(csEnumType.Namespace))
+            sb.AppendLine($"CS.{csEnumType.Namespace}.{csEnumType.Name} = {csEnumType.Name}");
+        else
+            sb.AppendLine($"CS.{csEnumType.Name} = {csEnumType.Name}");
     }
 
     private void HandleCsDelegate(CSDelegate csDelegate, StringBuilder sb)
@@ -257,7 +324,9 @@ public class XLuaDumper : IDumper
         TypeTracker.CheckAndRecordType(csDelegate.InvokeMethod.ReturnTypeName);
         foreach (var param in csDelegate.InvokeMethod.Params) TypeTracker.CheckAndRecordType(param.TypeName);
 
-        LuaAnnotationFormatter.WriteDelegateAlias(sb, csDelegate.Name, csDelegate.InvokeMethod);
+        // 使用完整的委托名称（带有CS前缀和命名空间）
+        var fullDelegateName = GetFullTypeName(csDelegate.Namespace, csDelegate.Name);
+        LuaAnnotationFormatter.WriteDelegateAlias(sb, fullDelegateName, csDelegate.InvokeMethod);
     }
 
     private List<CSTypeMethod> GetCtorList(CSClassType csClassType)
