@@ -96,6 +96,26 @@ public class XLuaDumper : IDumper
         }
     }
 
+    private void DumpNamespace(StringBuilder sb, string outPath)
+    {
+        sb.AppendLine("CS = {}");
+        foreach (var (namespaceString, isNamespace) in NamespaceDict)
+            if (isNamespace)
+                sb.AppendLine($"---@type namespace <\"{namespaceString}\">\nCS.{namespaceString} = {{}}");
+            else
+                sb.AppendLine($"---@type {namespaceString}\nCS.{namespaceString} = {{}}");
+
+        // 添加 XLua 的 typeof 函数定义
+        sb.AppendLine();
+        sb.AppendLine("---XLua typeof 函数，用于获取 C# 类型");
+        sb.AppendLine("---@param type any");
+        sb.AppendLine("---@return System.Type");
+        sb.AppendLine("function typeof(type) end");
+
+        var filePath = Path.Combine(outPath, "xlua_namespace.lua");
+        File.WriteAllText(filePath, sb.ToString());
+    }
+
     private void CacheOrDumpToFile(StringBuilder sb, string outPath, bool force = false)
     {
         if (sb.Length > SingleFileLength || force)
@@ -128,7 +148,7 @@ public class XLuaDumper : IDumper
         sb.AppendLine("function typeof(type) end");
         sb.AppendLine();
     }
-    
+
     /// <summary>
     /// 在生成类型定义之前，确保所有必要的命名空间都已创建
     /// </summary>
@@ -148,6 +168,20 @@ public class XLuaDumper : IDumper
         sb.AppendLine();
     }
 
+    /// <summary>
+    /// 检查是否为基本类型
+    /// </summary>
+    private bool IsPrimitiveType(string typeName)
+    {
+        var primitiveTypes = new[]
+        {
+            "void", "bool", "byte", "sbyte", "short", "ushort", "int", "uint",
+            "long", "ulong", "float", "double", "decimal", "char", "string", "object",
+            "boolean", "integer", "number", "any"
+        };
+        return primitiveTypes.Contains(typeName);
+    }
+
     private void HandleCsClassType(CSClassType csClassType, StringBuilder sb)
     {
         RegisterNamespace(csClassType.Namespace, csClassType.Name);
@@ -158,6 +192,9 @@ public class XLuaDumper : IDumper
         TypeTracker.CheckAndRecordType(csClassType.BaseClass);
         foreach (var iface in csClassType.Interfaces) TypeTracker.CheckAndRecordType(iface);
 
+        // 确保命名空间存在
+        EnsureNamespaceExists(sb, csClassType.Namespace);
+        
         LuaAnnotationFormatter.WriteCommentAndLocation(sb, csClassType.Comment, csClassType.Location);
         LuaAnnotationFormatter.WriteTypeAnnotation(
             sb, "class", classFullName, csClassType.BaseClass, csClassType.Interfaces, csClassType.GenericTypes);
@@ -177,10 +214,13 @@ public class XLuaDumper : IDumper
                 sb.AppendLine($"---@overload fun(): {classFullName}");
         }
 
-        // 使用local变量定义类
-        sb.AppendLine($"local {csClassType.Name} = {{}}");
+        // 直接使用完整CS路径定义类
+        var fullCsPath = !string.IsNullOrEmpty(csClassType.Namespace)
+            ? $"CS.{csClassType.Namespace}.{csClassType.Name}"
+            : $"CS.{csClassType.Name}";
+        sb.AppendLine($"{fullCsPath} = {{}}");
 
-        // Write fields and events
+        // 定义所有字段，确保IDE能正确识别类型
         foreach (var field in csClassType.Fields)
         {
             // 检查字段类型
@@ -188,14 +228,40 @@ public class XLuaDumper : IDumper
 
             LuaAnnotationFormatter.WriteCommentAndLocation(sb, field.Comment, field.Location);
 
-            // 区分事件和普通字段
-            if (field.IsEvent)
-                LuaAnnotationFormatter.WriteEventAnnotation(sb, field.TypeName, csClassType.Name, field.Name);
+            // 确保类型名带有CS前缀
+            var typeName = field.TypeName;
+            // 跳过基本类型和已带有CS前缀的类型
+            if (!string.IsNullOrEmpty(typeName) && !typeName.StartsWith("CS.") && 
+                !typeName.StartsWith("System.") && !IsPrimitiveType(typeName))
+            {
+                // 检查是否包含命名空间
+                if (typeName.Contains('.'))
+                {
+                    typeName = "CS." + typeName;
+                }
+                else
+                {
+                    // 对于没有命名空间的类型，检查是否为已知的Unity或其他框架类型
+                    typeName = "CS." + typeName;
+                }
+            }
+
+            // 直接使用完整CS路径定义字段
+            sb.AppendLine($"---@type {typeName}");
+            
+            // 对于静态单例属性inst，使用更合适的初始化值以帮助IDE类型推断
+            if (field.Name == "inst")
+            {
+                sb.AppendLine($"{fullCsPath}.{field.Name} = {fullCsPath}");
+            }
             else
-                LuaAnnotationFormatter.WriteFieldAnnotation(sb, field.TypeName, csClassType.Name, field.Name);
+            {
+                sb.AppendLine($"{fullCsPath}.{field.Name} = nil");
+            }
+            sb.AppendLine();
         }
 
-        // Write methods
+        // 最后定义所有方法，确保IDE能正确关联方法到类
         foreach (var method in csClassType.Methods)
         {
             if (method.Name == ".ctor")
@@ -210,18 +276,13 @@ public class XLuaDumper : IDumper
             LuaAnnotationFormatter.WriteCommentAndLocation(sb, method.Comment, method.Location);
             var outParams = LuaAnnotationFormatter.WriteParameterAnnotations(sb, method.Params);
             LuaAnnotationFormatter.WriteReturnAnnotation(sb, method.ReturnTypeName, outParams);
-            LuaAnnotationFormatter.WriteMethodDeclaration(sb, csClassType.Name, method.Name, method.Params,
-                method.IsStatic);
+            
+            // 直接使用完整CS路径定义方法（传统函数格式）
+            var paramNames = string.Join(", ", method.Params.Select(p => p.Name));
+            sb.AppendLine($"function {fullCsPath}:{method.Name}({paramNames})");
+            sb.AppendLine("end");
+            sb.AppendLine();
         }
-        
-        // 确保命名空间存在（移到赋值之前）
-        EnsureNamespaceExists(sb, csClassType.Namespace);
-        
-        // 最后将local变量赋值给完整的CS路径
-        if (!string.IsNullOrEmpty(csClassType.Namespace))
-            sb.AppendLine($"CS.{csClassType.Namespace}.{csClassType.Name} = {csClassType.Name}");
-        else
-            sb.AppendLine($"CS.{csClassType.Name} = {csClassType.Name}");
     }
 
     private void RegisterNamespace(string namespaceName, string typeName)
@@ -255,6 +316,9 @@ public class XLuaDumper : IDumper
 
         var interfaceFullName = GetFullTypeName(csInterface.Namespace, csInterface.Name);
 
+        // 确保命名空间存在
+        EnsureNamespaceExists(sb, csInterface.Namespace);
+        
         // 检查接口继承
         foreach (var iface in csInterface.Interfaces) TypeTracker.CheckAndRecordType(iface);
 
@@ -270,17 +334,12 @@ public class XLuaDumper : IDumper
 
         sb.AppendLine($"---@interface {interfaceFullName}");
         
-        // 使用local变量定义接口
-        sb.AppendLine($"local {csInterface.Name} = {{}}");
-        
-        // 确保命名空间存在（移到赋值之前）
-        EnsureNamespaceExists(sb, csInterface.Namespace);
-        
-        // 最后将local变量赋值给完整的CS路径
-        if (!string.IsNullOrEmpty(csInterface.Namespace))
-            sb.AppendLine($"CS.{csInterface.Namespace}.{csInterface.Name} = {csInterface.Name}");
-        else
-            sb.AppendLine($"CS.{csInterface.Name} = {csInterface.Name}");
+        // 直接使用完整CS路径定义接口
+        var fullCsPath = !string.IsNullOrEmpty(csInterface.Namespace)
+            ? $"CS.{csInterface.Namespace}.{csInterface.Name}"
+            : $"CS.{csInterface.Name}";
+        sb.AppendLine($"{fullCsPath} = {{}}");
+        sb.AppendLine();
     }
 
     private void HandleCsEnumType(CSEnumType csEnumType, StringBuilder sb)
@@ -289,11 +348,17 @@ public class XLuaDumper : IDumper
 
         var classFullName = GetFullTypeName(csEnumType.Namespace, csEnumType.Name);
 
+        // 确保命名空间存在
+        EnsureNamespaceExists(sb, csEnumType.Namespace);
+        
         LuaAnnotationFormatter.WriteCommentAndLocation(sb, csEnumType.Comment, csEnumType.Location);
         LuaAnnotationFormatter.WriteTypeAnnotation(sb, "enum", classFullName);
 
-        // 使用local变量定义枚举
-        sb.AppendLine($"local {csEnumType.Name} = {{");
+        // 直接使用完整CS路径定义枚举
+        var fullCsPath = !string.IsNullOrEmpty(csEnumType.Namespace)
+            ? $"CS.{csEnumType.Namespace}.{csEnumType.Name}"
+            : $"CS.{csEnumType.Name}";
+        sb.AppendLine($"{fullCsPath} = {{");
 
         foreach (var field in csEnumType.Fields)
         {
@@ -305,21 +370,16 @@ public class XLuaDumper : IDumper
         }
 
         sb.AppendLine("}");
-        
-        // 确保命名空间存在（移到赋值之前）
-        EnsureNamespaceExists(sb, csEnumType.Namespace);
-        
-        // 最后将local变量赋值给完整的CS路径
-        if (!string.IsNullOrEmpty(csEnumType.Namespace))
-            sb.AppendLine($"CS.{csEnumType.Namespace}.{csEnumType.Name} = {csEnumType.Name}");
-        else
-            sb.AppendLine($"CS.{csEnumType.Name} = {csEnumType.Name}");
+        sb.AppendLine();
     }
 
     private void HandleCsDelegate(CSDelegate csDelegate, StringBuilder sb)
     {
         RegisterNamespace(csDelegate.Namespace, csDelegate.Name);
 
+        // 确保命名空间存在
+        EnsureNamespaceExists(sb, csDelegate.Namespace);
+        
         // 检查委托的返回类型和参数类型
         TypeTracker.CheckAndRecordType(csDelegate.InvokeMethod.ReturnTypeName);
         foreach (var param in csDelegate.InvokeMethod.Params) TypeTracker.CheckAndRecordType(param.TypeName);
