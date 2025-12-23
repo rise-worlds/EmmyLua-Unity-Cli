@@ -1,30 +1,27 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>EmmyLua.Unity</RootNamespace>
-    <OptimizationPreference>Speed</OptimizationPreference>
-<!--    <InvariantGlobalization>true</InvariantGlobalization>-->
-<!--    <PublishAot>true</PublishAot>-->
-    <PublishTrimmed>true</PublishTrimmed>
-    <TrimMode>Link</TrimMode>
-    <PublishSingleFile>false</PublishSingleFile>
-    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
-    <PublishReadyToRun>true</PublishReadyToRun>
-    <ReadyToRunShowWarnings>false</ReadyToRunShowWarnings>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
     <PackageReference Include="Microsoft.Build.Locator" Version="1.4.1" />
     <PackageReference Include="Microsoft.CodeAnalysis" Version="4.3.0-1.final" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.3.0-1.final" />
-    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="4.3.0-1.final" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="4.3.0-1.final" >
+      <TreatAsUsed>true</TreatAsUsed>
+    </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Logging" Version="7.0.0-preview.5.22301.12" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3">
-      <PrivateAssets>all</PrivateAssets>
+          <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
   </ItemGroup>
+
 </Project>
