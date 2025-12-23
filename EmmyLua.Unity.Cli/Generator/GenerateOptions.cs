@@ -8,6 +8,10 @@ namespace EmmyLua.Unity.Generator;
 // ReSharper disable once ClassNeverInstantiated.Global
 public class GenerateOptions
 {
+    public GenerateOptions()
+    {
+    }
+
     [Option('s', "solution", Required = true, HelpText = "The path to the solution file(.sln).")]
     public string Solution { get; set; } = string.Empty;
 
